@@ -6,7 +6,7 @@ public:
   MyCustomClimate(UARTComponent *parent) : UARTDevice(parent) {}
   MyCustomClimate() : PollingComponent() {}
   bool is_changed : 1;
-
+  bool beeper_status_ = true; // По умолчанию включено
   union get_cmd_resp_t{
     struct {
       uint8_t header;
@@ -230,13 +230,27 @@ public:
     this->target_temperature = target_temperature;
   }
 
+  void set_beeper_status(bool status) {
+      if (beeper_status_ != status) {
+          beeper_status_ = status;
+          ESP_LOGD("TCL", "Beep mode %s", status ? "ON" : "OFF");
+          
+          // Создаем команду для отправки
+          get_cmd_resp_t get_cmd_resp = {0};
+          memcpy(get_cmd_resp.raw, m_get_cmd_resp.raw, sizeof(get_cmd_resp.raw));
+          
+          build_set_cmd(&get_cmd_resp);
+          ready_to_send_set_cmd_flag = true;
+      }
+  }
+
   void build_set_cmd(get_cmd_resp_t * get_cmd_resp) {
     memcpy(m_set_cmd.raw, set_cmd_base, sizeof(m_set_cmd.raw));
 
     m_set_cmd.data.power = get_cmd_resp->data.power;
     m_set_cmd.data.off_timer_en = 0;
     m_set_cmd.data.on_timer_en = 0;
-    m_set_cmd.data.beep = 1;
+    m_set_cmd.data.beep = beeper_status_ ? 1 : 0; // Устанавливаем состояние пищалки
     m_set_cmd.data.disp = 1;
     m_set_cmd.data.eco = 0;
 
@@ -371,6 +385,11 @@ public:
   }
   
   void control(const ClimateCall &call) override {
+    if (call.get_custom_beeper().has_value()) {
+        // Пользователь изменил состояние пищалки
+        bool beeper_status = *call.get_custom_beeper();
+        set_beeper_status(beeper_status);
+    }
     if (call.get_mode().has_value()) {
       // User requested mode change
       ClimateMode climate_mode = *call.get_mode();
@@ -494,6 +513,9 @@ public:
     traits.set_visual_min_temperature(16.0);
     traits.set_visual_max_temperature(31.0);
     traits.set_visual_target_temperature_step(1.0);
+
+    traits.add_supported_custom_characteristic("beeper");
+    
     return traits;
   }
 
